@@ -1,13 +1,12 @@
 /**
  * @file xmodem.c
  * @brief XMODEM送受信モジュールの本体実装
+ * 
+ * @copyright Copyright (c) 2026 Embedead-Inside
+ * @license SPDX-License-Identifier: MIT-0
  */
 
 #include "xmodem.h"
-
-/* 外部プラットフォーム（各BSP/HAL）が提供すべきI/O関数 */
-extern void uart_send(uint8_t b);
-extern int  uart_recv(uint8_t *b, uint32_t timeout_ms); /* 成功:1, 失敗:0 */
 
 #define SOH        0x01
 #define EOT        0x04
@@ -19,23 +18,24 @@ extern int  uart_recv(uint8_t *b, uint32_t timeout_ms); /* 成功:1, 失敗:0 */
 /**
  * @brief XMODEM 受信メイン処理
  */
-int xmodem_receive(void) {
+int xmodem_receive(void)
+{
     uint8_t seq_exp = 1, errs = 0, h, seq, inv, sum, rcsum, buf[128];
     int i;
 
-    xmodem_callback(XMODEM_EVT_START, 0, 0);
+    xmodem_callback(XMODEM_START, 0, (void*)0);
     uart_send(NAK);
 
     while (1) {
         if (!uart_recv(&h, 3000)) {
-            if (++errs > MAX_ERRORS) return XMODEM_RES_ERROR;
+            if (++errs > MAX_ERRORS) return XMODEM_ERROR;
             uart_send(NAK);
             continue;
         }
 
         if (h == EOT) {
             uart_send(ACK);
-            return XMODEM_RES_COMPLETE;
+            return XMODEM_COMPLETE;
         }
 
         if (h != SOH) {
@@ -50,13 +50,13 @@ int xmodem_receive(void) {
 
         sum = 0;
         for (i = 0; i < 128; i++) {
-            if (!uart_recv(&buf[i], 1000)) return XMODEM_RES_ERROR;
+            if (!uart_recv(&buf[i], 1000)) return XMODEM_ERROR;
             sum += buf[i];
         }
 
         if (!uart_recv(&rcsum, 1000) || sum != rcsum || seq != seq_exp) {
             uart_send(NAK);
-            if (++errs > MAX_ERRORS) return XMODEM_RES_ERROR;
+            if (++errs > MAX_ERRORS) return XMODEM_ERROR;
             continue;
         }
 
@@ -65,52 +65,55 @@ int xmodem_receive(void) {
             continue;
         }
 
-        if (xmodem_callback(XMODEM_EVT_PACKET, seq, buf) != 0) {
+        if (xmodem_callback(XMODEM_PACKET, seq, buf) != 0) {
             uart_send(CAN);
-            return XMODEM_RES_CANCEL;
+            return XMODEM_CANCEL;
         }
 
         seq_exp++;
         errs = 0;
-        uart_send(ACK);
+            uart_send(ACK);
     }
 }
 
 /**
  * @brief XMODEM 送信メイン処理
  */
-int xmodem_transmit(void) {
+int xmodem_transmit(void)
+{
     uint8_t seq = 1, errs = 0, resp, sum, buf[128];
     int i;
 
-    // 接続待受（NAK または 'C' を待つ）
+    xmodem_callback(XMODEM_START, 0, (void*)0);
+
+    /* 接続待受（NAK または 'C' を待つ） */
     while (1) {
         if (!uart_recv(&resp, 3000)) {
-            if (++errs > MAX_ERRORS) return XMODEM_RES_ERROR;
+            if (++errs > MAX_ERRORS) return XMODEM_ERROR;
             continue;
         }
         if (resp == NAK || resp == 'C') {
             break;
         }
         if (resp == CAN) {
-            return XMODEM_RES_ERROR;
+            return XMODEM_ERROR;
         }
     }
     errs = 0;
 
     while (1) {
-        // データ取得（これ以上ない場合は EOT を送って終了処理へ）
-        if (xmodem_tx_callback(seq, buf) != 0) {
+        /* コールバック経由で次データ取得（非0返却時はデータ終了とみなしEOTへ） */
+        if (xmodem_callback(XMODEM_PACKET, seq, buf) != 0) {
             uart_send(EOT);
             
             if (uart_recv(&resp, 3000) && resp == ACK) {
-                return XMODEM_RES_COMPLETE;
+                return XMODEM_COMPLETE;
             } else {
-                return XMODEM_RES_ERROR;
+                return XMODEM_ERROR;
             }
         }
 
-        // パケット送信 (SOH + Seq + ~Seq + Data[128] + Checksum)
+        /* パケット送信 (SOH + Seq + ~Seq + Data[128] + Checksum) */
         uart_send(SOH);
         uart_send(seq);
         uart_send((uint8_t)~seq);
@@ -121,9 +124,9 @@ int xmodem_transmit(void) {
         }
         uart_send(sum);
 
-        // 応答受信
+        /* 応答受信 */
         if (!uart_recv(&resp, 3000)) {
-            if (++errs > MAX_ERRORS) return XMODEM_RES_ERROR;
+            if (++errs > MAX_ERRORS) return XMODEM_ERROR;
             continue;
         }
 
@@ -131,9 +134,9 @@ int xmodem_transmit(void) {
             seq++;
             errs = 0;
         } else if (resp == CAN) {
-            return XMODEM_RES_CANCEL;
+            return XMODEM_CANCEL;
         } else {
-            if (++errs > MAX_ERRORS) return XMODEM_RES_ERROR;
+            if (++errs > MAX_ERRORS) return XMODEM_ERROR;
         }
     }
 }
