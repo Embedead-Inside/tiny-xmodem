@@ -28,7 +28,10 @@ int xmodem_receive(void)
 
     while (1) {
         if (!uart_recv(&h, 3000)) {
-            if (++errs > MAX_ERRORS) return XMODEM_ERROR;
+            if (++errs > MAX_ERRORS) {
+                uart_send(CAN);
+                return XMODEM_ERROR;
+            }
             uart_send(NAK);
             continue;
         }
@@ -39,6 +42,7 @@ int xmodem_receive(void)
         }
 
         if (h != SOH) {
+            if (h == CAN) return XMODEM_CANCEL; /* 相手からのキャンセルも考慮 */
             uart_send(NAK);
             continue;
         }
@@ -50,21 +54,39 @@ int xmodem_receive(void)
 
         sum = 0;
         for (i = 0; i < 128; i++) {
-            if (!uart_recv(&buf[i], 1000)) return XMODEM_ERROR;
+            if (!uart_recv(&buf[i], 1000)) {
+                uart_send(CAN);
+                return XMODEM_ERROR;
+            }
             sum += buf[i];
         }
 
-        if (!uart_recv(&rcsum, 1000) || sum != rcsum || seq != seq_exp) {
+        if (!uart_recv(&rcsum, 1000) || sum != rcsum) {
             uart_send(NAK);
-            if (++errs > MAX_ERRORS) return XMODEM_ERROR;
+            if (++errs > MAX_ERRORS) {
+                uart_send(CAN);
+                return XMODEM_ERROR;
+            }
             continue;
         }
 
+        /* 重複パケットの処理（直前のACKが相手に届かなかったケース） */
         if (seq == (uint8_t)(seq_exp - 1)) {
             uart_send(ACK);
             continue;
         }
 
+        /* シーケンス番号不一致のエラー処理 */
+        if (seq != seq_exp) {
+            uart_send(NAK);
+            if (++errs > MAX_ERRORS) {
+                uart_send(CAN);
+                return XMODEM_ERROR;
+            }
+            continue;
+        }
+
+        /* 正常パケットの処理（コールバックを呼び出し） */
         if (xmodem_callback(XMODEM_PACKET, seq, buf) != 0) {
             uart_send(CAN);
             return XMODEM_CANCEL;
@@ -72,7 +94,7 @@ int xmodem_receive(void)
 
         seq_exp++;
         errs = 0;
-            uart_send(ACK);
+        uart_send(ACK);
     }
 }
 
@@ -96,7 +118,7 @@ int xmodem_transmit(void)
             break;
         }
         if (resp == CAN) {
-            return XMODEM_ERROR;
+            return XMODEM_CANCEL; /* CANなのでCANCELで返すのが自然 */
         }
     }
     errs = 0;
@@ -136,7 +158,10 @@ int xmodem_transmit(void)
         } else if (resp == CAN) {
             return XMODEM_CANCEL;
         } else {
-            if (++errs > MAX_ERRORS) return XMODEM_ERROR;
+            if (++errs > MAX_ERRORS) {
+                uart_send(CAN);
+                return XMODEM_ERROR;
+            }
         }
     }
 }
