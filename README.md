@@ -1,5 +1,8 @@
 # tiny-xmodem
 
+[![License: MIT-0](https://img.shields.io/badge/License-MIT--0-blue.svg)](https://spdx.org/licenses/MIT-0.html)
+[![Language: C99](https://img.shields.io/badge/Language-C99-green.svg)](#)
+
 ベアメタル環境（組込みC言語）向けの、極めて小さくコンパクトな **XMODEM送受信ライブラリ** です。
 
 ハードウェア依存部（UARTの送受信）を完全に切り離しているため、任意のマイコンアーキテクチャや独自BSP/HAL環境にそのまま組み込んで利用できます。
